@@ -207,6 +207,28 @@ module.exports = class FolioPublish extends Plugin {
     }
     op.statusFile = path.join(root, '.folio', 'publish-status.json');
     op.baseline = snapshotSync(op.statusFile);
+    this.saveAndLaunch(op);
+  }
+
+  async saveAndLaunch(op) {
+    try {
+      // Obsidian debounces auto-save. Flush open notes before hashing disk files.
+      const views = new Set(this.app.workspace.getLeavesOfType('markdown').map(leaf => leaf.view));
+      for (const view of views) {
+        if (!view?.file || typeof view.save !== 'function') continue;
+        this.update({ message: '正在保存编辑内容…' });
+        await view.save();
+        if (!this.isActive(op)) return;
+      }
+    } catch (error) {
+      this.finish(op, { status: 'failed', message: `保存编辑内容失败，尚未开始发布：${error.message}` });
+      return;
+    }
+    if (this.isActive(op)) this.launch(op);
+  }
+
+  launch(op) {
+    const root = op.root;
     const additions = this.settings.pathAdditions.split(/[\r\n]+/).map(value => value.trim()).filter(Boolean);
     const env = { ...process.env };
     const pathKey = Object.keys(env).find(key => key.toUpperCase() === 'PATH') || 'PATH';

@@ -110,6 +110,7 @@ function harness(options = {}) {
   };
   const mockFs = { statSync: stat, readFileSync: read, promises: { stat: async file => stat(file), readFile: async file => read(file) } };
   const app = {
+    workspace: { getLeavesOfType: type => type === 'markdown' ? (options.views || []).map(view => ({ view })) : [] },
     loadLocalStorage() { storageReads.push('device'); return settings; },
     saveLocalStorage(key, value) { saved.push({ key, value }); },
   };
@@ -235,6 +236,30 @@ await test('command spawns direct node with cwd and configured PATH, then automa
   const links = h.plugin.modal.contentEl.all('a');
   assert.deepEqual(links.map(link => link.attributes.href), ['https://site.example/', 'https://deploy.example/42']);
   assert.ok(links.every(link => link.attributes.rel === 'noopener noreferrer'));
+});
+
+await test('publishing waits for editor saves and never uploads after a failed save or unloading', async () => {
+  let complete;
+  let saves = 0;
+  const saved = new Promise(resolve => { complete = resolve; });
+  const view = { file: { path: 'latest.md' }, save: () => { saves++; return saved; } };
+  const h = harness({ views: [view, view] }); await h.start(); h.press();
+  assert.equal(saves, 1);
+  assert.equal(h.calls.length, 0, 'content diff cannot run before the editor is saved');
+  h.press(); assert.equal(saves, 1, 'repeated shortcuts while saving do not start another operation');
+  complete(); await h.flush();
+  assert.equal(h.calls.length, 1);
+  h.children[0].send({ type: 'result', status: 'unchanged' }); h.final('unchanged');
+
+  const failed = harness({ views: [{ file: { path: 'latest.md' }, save: async () => { throw new Error('disk full'); } }] });
+  await failed.start(); failed.press(); await failed.flush(); failed.final('failed');
+  assert.equal(failed.calls.length, 0);
+  assert.match(failed.plugin.state.message, /保存.*disk full/);
+
+  let finish;
+  const unloaded = harness({ views: [{ file: { path: 'latest.md' }, save: () => new Promise(resolve => { finish = resolve; }) }] });
+  await unloaded.start(); unloaded.press(); unloaded.plugin.onunload(); finish(); await unloaded.flush();
+  assert.equal(unloaded.calls.length, 0, 'unloading before a save completes cannot launch a detached operation');
 });
 
 await test('active hotkeys focus one modal; every hotkey after completion starts a fresh check in that modal', async () => {
