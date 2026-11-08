@@ -9,6 +9,17 @@ export async function pagesSite(api, project) {
   return `https://${data.result.subdomain}`
 }
 
+export async function waitForDeployment(readMarker, expected, {
+  attempts = 12, intervalMs = 5000, pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
+} = {}) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const marker = await readMarker()
+    if (marker && marker.revision === expected.revision && marker.recipe === expected.recipe && marker.deploymentId === expected.deploymentId) return marker
+    if (attempt + 1 < attempts) await pause(intervalMs)
+  }
+  throw new Error('The new release is not live; cleanup stopped')
+}
+
 export async function storageMaintenanceClient() {
   let gateway = process.env.FOLIO_BUILD_URL
   let token = process.env.FOLIO_STORAGE_TOKEN

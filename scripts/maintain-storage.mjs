@@ -6,7 +6,7 @@ import { cloudflareClient, required } from './cloudflare.mjs'
 import { photoRecipe } from './photo-variants.mjs'
 import { validateRelease } from './release.mjs'
 import { maintainStorage } from './storage-retention.mjs'
-import { pagesSite, storageMaintenanceClient, withStorageLease } from './storage-maintenance.mjs'
+import { pagesSite, storageMaintenanceClient, waitForDeployment, withStorageLease } from './storage-maintenance.mjs'
 
 const mode = process.argv[2]
 if (!['prepare', 'preview', 'apply'].includes(mode)) throw new Error('Usage: node scripts/maintain-storage.mjs prepare|preview|apply')
@@ -31,12 +31,13 @@ if (mode === 'prepare') {
   await fs.writeFile('out/folio-release.json', JSON.stringify({ version: 1, revision: release.revision, recipe: photoRecipe,
     deploymentId: createHash('sha256').update(randomUUID()).digest('hex'), previousDeploymentId: previous?.deploymentId ?? null }))
 } else {
-  const marker = await liveMarker()
+  let marker
   if (mode === 'apply') {
     const expected = validateRelease(JSON.parse(await fs.readFile(path.join(archiveRoot, 'release.json'), 'utf8')))
     const prepared = JSON.parse(await fs.readFile('out/folio-release.json', 'utf8'))
-    if (expected.revision !== marker.revision || marker.recipe !== photoRecipe || prepared.deploymentId !== marker.deploymentId) throw new Error('The new release is not live; cleanup stopped')
-  }
+    console.log('Waiting for the new deployment before storage cleanup')
+    marker = await waitForDeployment(() => liveMarker(true), { revision: expected.revision, recipe: photoRecipe, deploymentId: prepared.deploymentId })
+  } else marker = await liveMarker()
   const api = await storageMaintenanceClient()
   const summary = await withStorageLease(api, lease => maintainStorage({
     api, lease, sourceBucket: required('FOLIO_SOURCE_BUCKET'), marker, apply: mode === 'apply',

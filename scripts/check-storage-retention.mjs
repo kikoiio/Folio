@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { revisionFor } from './release.mjs'
 import { maintainStorage, releaseObjects, retentionPlan as planRetention } from './storage-retention.mjs'
-import { pagesSite, withStorageLease } from './storage-maintenance.mjs'
+import { pagesSite, waitForDeployment, withStorageLease } from './storage-maintenance.mjs'
 import { publishRelease } from './publish-release.mjs'
 import { restoreRelease } from './restore-release.mjs'
 import buildWorker from '../workers/build.mjs'
@@ -205,4 +205,46 @@ test('Pages project names resolve through the API instead of assuming a matching
     return Response.json({ success: true, result: { subdomain: 'blog-b99.pages.dev' } })
   } }
   assert.equal(await pagesSite(api, 'blog'), 'https://blog-b99.pages.dev')
+})
+
+test('deployment verification waits until the exact release, recipe and deployment are visible', async () => {
+  const expected = { revision, recipe: 'v2', deploymentId: hash('d') }
+  const markers = [
+    { ...expected, revision: hash('b') },
+    null,
+    { ...expected, recipe: 'v1' },
+    { ...expected, deploymentId: hash('c') },
+    expected,
+  ]
+  const delays = []
+  let reads = 0
+  const actual = await waitForDeployment(async () => markers[reads++], expected, {
+    attempts: 5, intervalMs: 7, pause: async milliseconds => { delays.push(milliseconds) },
+  })
+  assert.equal(actual, expected)
+  assert.equal(reads, 5)
+  assert.deepEqual(delays, [7, 7, 7, 7])
+})
+
+test('deployment verification stays bounded when only an older deployment of the same release is live', async () => {
+  const expected = { revision, recipe: 'v2', deploymentId: hash('d') }
+  let reads = 0
+  const delays = []
+  await assert.rejects(waitForDeployment(async () => {
+    reads++
+    return { ...expected, deploymentId: hash('c') }
+  }, expected, { attempts: 3, intervalMs: 7, pause: async milliseconds => { delays.push(milliseconds) } }), /The new release is not live; cleanup stopped/)
+  assert.equal(reads, 3)
+  assert.deepEqual(delays, [7, 7])
+})
+
+test('deployment verification rejects invalid marker reads without retrying or waiting', async () => {
+  let reads = 0
+  await assert.rejects(waitForDeployment(async () => {
+    reads++
+    throw new Error('Invalid production deployment marker')
+  }, { revision, recipe: 'v2', deploymentId: hash('d') }, {
+    pause: async () => { assert.fail('Invalid deployment data must not be retried') },
+  }), /Invalid production deployment marker/)
+  assert.equal(reads, 1)
 })
