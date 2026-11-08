@@ -12,11 +12,12 @@ export function required(name) {
 }
 
 export function cloudflareClient(options = {}) {
+  const externalSignal = options.signal
   const account = required('CLOUDFLARE_ACCOUNT_ID')
   const gateway = options.gateway ?? process.env.FOLIO_BUILD_URL
   let token = options.token ?? (gateway ? required('FOLIO_STORAGE_TOKEN') : process.env.CLOUDFLARE_API_TOKEN)
   if (!token && !process.env.CI) {
-    const auth = JSON.parse(execFileSync('wrangler', ['auth', 'token', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
+    const auth = JSON.parse(execFileSync('wrangler', ['auth', 'token', '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000 }))
     token = auth.token
   }
   if (!token) throw new Error('Configure CLOUDFLARE_API_TOKEN or sign in with Wrangler locally')
@@ -25,13 +26,15 @@ export function cloudflareClient(options = {}) {
 
   async function request(endpoint, options = {}) {
     for (let attempt = 0; attempt < 3; attempt++) {
+      externalSignal?.throwIfAborted()
+      options.signal?.throwIfAborted()
       try {
         const response = await fetch(`${base}/${endpoint}`, {
           method: options.method ?? 'GET',
           headers: { Authorization: `Bearer ${token}`, ...options.headers },
           body: options.body?.(),
           ...(options.body ? { duplex: 'half' } : {}),
-          signal: AbortSignal.timeout(180_000),
+          signal: AbortSignal.any([AbortSignal.timeout(180_000), ...[externalSignal, options.signal].filter(Boolean)]),
         })
         if ([429, 502, 503, 504].includes(response.status) && attempt < 2) {
           await response.body?.cancel()

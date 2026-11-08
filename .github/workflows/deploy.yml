@@ -1,4 +1,5 @@
 name: Build and deploy Folio
+run-name: Publish ${{ inputs.revision || github.sha }}
 
 on:
   push:
@@ -52,6 +53,9 @@ jobs:
 
       - name: Check seven-day storage retention
         run: node --test scripts/check-storage-retention.mjs
+
+      - name: Check publication diff, duplicate protection and progress
+        run: node --test --test-concurrency=1 scripts/check-publish-*.mjs
 
       - name: Restore immutable archive from private R2
         run: npm run restore-release

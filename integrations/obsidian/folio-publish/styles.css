@@ -1,0 +1,71 @@
+.folio-publish-modal {
+  width: min(620px, 92vw);
+}
+
+.folio-publish-status {
+  border-left: 3px solid var(--interactive-accent);
+  padding: 0.1em 0 0.1em 1em;
+}
+
+.folio-publish-status h3 {
+  margin: 0.4em 0;
+}
+
+.folio-publish-status.is-failed {
+  border-left-color: var(--text-error);
+}
+
+.folio-publish-status.is-published,
+.folio-publish-status.is-unchanged {
+  border-left-color: var(--text-success, var(--interactive-accent));
+}
+
+.folio-publish-status.is-pending,
+.folio-publish-status.is-published_with_warning {
+  border-left-color: var(--text-warning);
+}
+
+.folio-publish-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12em;
+  overflow: auto;
+}
+
+.folio-publish-counts {
+  font-weight: var(--font-semibold);
+}
+
+.folio-publish-files {
+  margin-block: 0.6em;
+}
+
+.folio-publish-files summary {
+  cursor: pointer;
+}
+
+.folio-publish-files ul {
+  max-height: 12em;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  font-size: var(--font-smaller);
+}
+
+.folio-publish-hint {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  overflow-wrap: anywhere;
+}
+
+.folio-publish-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1em;
+  margin-block: 1em;
+}
+
+.folio-publish-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1em;
+}

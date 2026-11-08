@@ -1,0 +1,9 @@
+{
+  "id": "folio-publish",
+  "name": "Folio 发布",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "一次快捷键自动检查变更、发布 Folio，并在 Obsidian 查看网站最终确认。",
+  "author": "Folio",
+  "isDesktopOnly": true
+}
