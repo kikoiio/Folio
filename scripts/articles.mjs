@@ -83,6 +83,10 @@ export function parseArticle({ source, relative, assets = new Map() }) {
   const usedIds = new Map()
   for (let index = 0; index < tokens.length; index++) {
     const token = tokens[index]
+    if (token.type === 'paragraph_open' && token.level === 0) {
+      const first = tokens[index + 1]?.children?.[0]
+      if (first?.type === 'text' && first.content.startsWith('\u3000\u3000')) token.attrSet('data-indent', 'manual')
+    }
     if (token.type === 'heading_open') {
       const text = textFrom(tokens[index + 1]?.children)
       const base = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || 'section'

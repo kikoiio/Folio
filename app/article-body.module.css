@@ -2,6 +2,8 @@
 .prose > :first-child { margin-top: 0; }
 .prose > :last-child { margin-bottom: 0; }
 .prose p { margin: 0 0 1.5em; }
+.prose > p { margin-bottom: 0; text-indent: 2em; }
+.prose > p[data-indent='manual'], .prose > p:has(> img:only-child) { text-indent: 0; }
 .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 { color: var(--ink); font-weight: 550; line-height: 1.5; scroll-margin-top: 32px; }
 .prose h1 { font-size: 30px; margin: 2em 0 1em; }
 .prose h2 { font-size: 25px; margin: 2.2em 0 1em; letter-spacing: -.5px; }
