@@ -1,10 +1,11 @@
 'use client'
 
-import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import type { GalleryAlbum, GalleryPhoto } from '../lib/gallery-types'
 import { filmstripLayout, filmstripTransform } from '../lib/filmstrip-layout.mjs'
 import { MOBILE_QUERY, galleryDragTarget, galleryDragDestination, gallerySwipeDirection, type GalleryAxis, type GallerySwipe, type GalleryDragOrigin } from '../lib/gallery-gestures'
+import { claimGalleryEntry, galleryIntroSample, galleryNavigationType, type GalleryEntryClaim } from '../lib/gallery-intro'
 import { advanceFilmstrip, heroImage, photoSources, sameFrameWindow, sameSettlement, requestedPhoto, settledPhoto, settledSource, thumbnailSource, type FilmstripMotion, type GalleryViewport, type SettledPhoto } from '../lib/gallery-performance'
 import { currentAlbum, rememberAlbum, rememberPhoto, subscribeAlbum } from '../lib/gallery-navigation'
 import { allowPhotoPrefetch, photoCache } from '../lib/gallery-photo-cache'
@@ -12,7 +13,9 @@ import styles from './page.module.css'
 
 type PanelStyle = CSSProperties & { '--paint-reveal': number; '--panel-side': string }
 type Frame = ReturnType<typeof filmstripLayout>[number]
-type FilmstripView = { frames: Frame[]; activeIndex: number; moving: boolean; settled: SettledPhoto | null; requested: SettledPhoto | null }
+type FilmstripView = { frames: Frame[]; activeIndex: number; moving: boolean; introducing: boolean; settled: SettledPhoto | null; requested: SettledPhoto | null }
+
+let entryClaim: GalleryEntryClaim | null = null
 type PhotographSource = { kind: 'responsive'; image: ReturnType<typeof heroImage> } | { kind: 'fixed'; src: string }
 type TouchGesture = GallerySwipe & { kind: 'pending' | 'dragging' }
 
@@ -116,7 +119,7 @@ function paintFrame(node: HTMLAnchorElement, frame: Frame, axis: GalleryAxis) {
   node.style.zIndex = String(frame.layer)
 }
 
-function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
+function useFilmstrip(photos: GalleryPhoto[], initialIndex: number, albumId: string, reading: boolean) {
   const count = photos.length
   const viewport = useRef<HTMLElement>(null)
   const panel = useRef<HTMLDivElement>(null)
@@ -130,12 +133,18 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
     frames: filmstripLayout(initialIndex, 0, count, 0),
     activeIndex: initialIndex,
     moving: false,
+    introducing: false,
     settled: { slot: initialIndex, revision: 0, viewport: emptyViewport },
     requested: null,
   }))
   const published = useRef(view)
   const layout = useRef(view.frames)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const introFrame = useRef(0)
+  const introRun = useRef(0)
+  const introActive = useRef(false)
+  const readingNow = useRef(reading)
+  readingNow.current = reading
   const motion = useRef<FilmstripMotion & { frame: number; lastTime: number }>({
     position: initialIndex, target: initialIndex, zoom: 0, zoomTarget: 0,
     focus: false, revision: 0, frame: 0, lastTime: 0,
@@ -149,13 +158,14 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
     layout.current = frames
     const activeIndex = Math.round(state.position)
     const moving = state.position !== state.target || state.zoom !== state.zoomTarget
+    const introducing = introActive.current
     const settled = settledPhoto(state, dimensions.current)
     const requested = requestedPhoto(state, dimensions.current)
     const previous = published.current
-    if (previous.activeIndex !== activeIndex || previous.moving !== moving
+    if (previous.activeIndex !== activeIndex || previous.moving !== moving || previous.introducing !== introducing
       || !sameFrameWindow(previous.frames, frames) || !sameSettlement(previous.settled, settled)
       || !sameSettlement(previous.requested, requested)) {
-      const next = { frames, activeIndex, moving, settled, requested }
+      const next = { frames, activeIndex, moving, introducing, settled, requested }
       published.current = next
       // Commit only discrete boundaries, before painting the new geometry. New
       // visible nodes/thumbnails and data-moving must land in the same paint.
@@ -182,6 +192,11 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
 
   const tick = useCallback(function tick(time: number) {
     const state = motion.current
+    if (introActive.current) {
+      paint()
+      state.frame = 0
+      return
+    }
     const elapsed = time - state.lastTime
     state.lastTime = time
     advanceFilmstrip(state, elapsed)
@@ -197,7 +212,25 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
     state.frame = requestAnimationFrame(tick)
   }, [tick])
 
-  const moveTo = useCallback((target: number, zoomTarget = 0, focus = false) => {
+  const stopIntro = useCallback((consume: boolean) => {
+    const active = introActive.current
+    introRun.current += 1
+    introActive.current = false
+    cancelAnimationFrame(introFrame.current)
+    introFrame.current = 0
+    if (!consume || !active) return
+    const state = motion.current
+    state.target = state.position
+    state.zoomTarget = state.zoom
+    state.focus = false
+    if (entryClaim) {
+      entryClaim.animate = false
+      entryClaim.applied = true
+    }
+  }, [])
+
+  const moveTo = useCallback((target: number, zoomTarget = 0, focus = false, scripted = false) => {
+    if (!scripted) stopIntro(true)
     clearTimeout(idleTimer.current)
     const state = motion.current
     state.revision++
@@ -214,13 +247,17 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
       state.focus = false
     }
     schedule()
-  }, [count, schedule])
+  }, [count, schedule, stopIntro])
+
+  const moveToRef = useRef(moveTo)
+  moveToRef.current = moveTo
 
   const beginDrag = useCallback(() => {
     if (count < 2) return
+    stopIntro(true)
     const state = motion.current
     drag.current = { position: state.position, zoom: state.zoom, selected: state.target, target: state.position }
-  }, [count])
+  }, [count, stopIntro])
 
   const dragTo = useCallback((distance: number) => {
     const origin = drag.current
@@ -266,6 +303,7 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
       if (count < 2 || event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
       if (event.target instanceof Element && event.target.closest('select, dialog')) return
       event.preventDefault()
+      if (introActive.current) stopIntro(true)
       const direction = Math.sign(event.deltaY)
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         if (performance.now() < reducedMotionUntil) return
@@ -292,7 +330,113 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
       cancelAnimationFrame(state.frame)
       state.frame = 0
     }
-  }, [count, moveTo, schedule, finishDrag, photos])
+  }, [count, moveTo, schedule, finishDrag, photos, stopIntro])
+
+  const snapTo = useCallback((index: number) => {
+    const state = motion.current
+    cancelAnimationFrame(state.frame)
+    state.frame = 0
+    state.position = index
+    state.target = index
+    state.zoom = 0
+    state.zoomTarget = 0
+    state.focus = false
+    state.revision += 1
+    paint()
+  }, [paint])
+
+  const playIntro = useCallback((index: number) => {
+    const run = ++introRun.current
+    introActive.current = true
+    const state = motion.current
+    state.position = 0
+    state.target = Math.max(0, count - 1)
+    state.zoom = 1
+    state.zoomTarget = 1
+    state.focus = false
+    paint()
+    let startedAt = 0
+    const loop = (now: number) => {
+      if (introRun.current !== run) return
+      const measured = dimensions.current.width > 0
+      if (!measured || startedAt === 0) {
+        if (measured) startedAt = now
+        introFrame.current = requestAnimationFrame(loop)
+        return
+      }
+      if (entryClaim) {
+        entryClaim.animate = false
+        entryClaim.applied = true
+      }
+      const sample = galleryIntroSample(now - startedAt, count, index)
+      if (sample.phase === 'arrive') {
+        state.position = sample.position
+        state.target = sample.position
+        state.zoom = 1
+        state.zoomTarget = 1
+        paint()
+        introActive.current = false
+        introRun.current += 1
+        cancelAnimationFrame(state.frame)
+        state.frame = 0
+        moveToRef.current(index, 1, true, true)
+        return
+      }
+      state.position = sample.position
+      state.target = sample.position
+      state.zoom = 1
+      state.zoomTarget = 1
+      state.focus = false
+      paint()
+      introFrame.current = requestAnimationFrame(loop)
+    }
+    introFrame.current = requestAnimationFrame(loop)
+    return () => {
+      if (introRun.current !== run) return
+      introRun.current += 1
+      introActive.current = false
+      cancelAnimationFrame(introFrame.current)
+      introFrame.current = 0
+    }
+  }, [count, paint])
+
+  useLayoutEffect(() => {
+    let started = false
+    let stop = () => {}
+    const start = () => {
+      if (started || readingNow.current || document.visibilityState === 'hidden'
+        || (document as { prerendering?: boolean }).prerendering === true) return
+      started = true
+      const entry = claimGalleryEntry(entryClaim, {
+        albumId,
+        count,
+        navigationType: galleryNavigationType(performance),
+        reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+        random: Math.random(),
+      })
+      entryClaim = entry.claim
+      document.documentElement.removeAttribute('data-folio-entry')
+      const ownsEntry = entry.claim.albumId === albumId
+      if (ownsEntry && entry.current.animate) {
+        stop = playIntro(entry.current.index)
+        return
+      }
+      const restingIndex = Math.min(positions.get(albumId) ?? 0, Math.max(0, count - 1))
+      if (ownsEntry && !entry.claim.applied && entry.current.index !== restingIndex) snapTo(entry.current.index)
+      if (ownsEntry) entry.claim.applied = true
+    }
+    const wake = () => queueMicrotask(start)
+    document.addEventListener('visibilitychange', wake)
+    document.addEventListener('prerenderingchange', wake)
+    window.addEventListener('hashchange', wake)
+    start()
+    return () => {
+      document.removeEventListener('visibilitychange', wake)
+      document.removeEventListener('prerenderingchange', wake)
+      window.removeEventListener('hashchange', wake)
+      stop()
+    }
+  }, [albumId, count, playIntro, snapTo])
 
   const registerFrame = useCallback((slot: number, node: HTMLAnchorElement | null) => {
     if (!node) { nodes.current.delete(slot); return }
@@ -302,7 +446,10 @@ function useFilmstrip(photos: GalleryPhoto[], initialIndex: number) {
   }, [])
   const isRequested = useCallback((target: SettledPhoto) => sameSettlement(target, requestedPhoto(motion.current, dimensions.current)), [])
   const select = useCallback((index: number) => moveTo(index, 0, true), [moveTo])
-  const step = useCallback((direction: number) => moveTo(Math.round(motion.current.target) + direction, 0, true), [moveTo])
+  const step = useCallback((direction: number) => {
+    if (introActive.current) stopIntro(true)
+    moveTo(Math.round(motion.current.target) + direction, 0, true)
+  }, [moveTo, stopIntro])
   return { viewport, panel, strip, axis, registerFrame, isRequested, ...view, select, step, beginDrag, dragTo, finishDrag }
 }
 
@@ -313,6 +460,9 @@ export default function Gallery({ albums, reading, children }: {
 }) {
   const albumId = useSyncExternalStore(subscribeAlbum, currentAlbum, () => '')
   const album = albums.find((item) => item.id === albumId) ?? albums[0]
+  useLayoutEffect(() => {
+    if (!album?.photos.length) document.documentElement.removeAttribute('data-folio-entry')
+  }, [album])
   if (!album || !album.photos.length) {
     return <main id="content" tabIndex={-1} className={styles.stage} data-reading={reading}>
       <div className={styles.panelShell} data-content-panel><div className={styles.panel}>
@@ -330,7 +480,7 @@ function AlbumGallery({ album, reading, children }: {
 }) {
   const { photos } = album
   const initialIndex = Math.min(positions.get(album.id) ?? 0, photos.length - 1)
-  const { viewport, panel, strip, axis, frames, activeIndex, moving, settled, requested, isRequested, registerFrame, select, step, beginDrag, dragTo, finishDrag } = useFilmstrip(photos, initialIndex)
+  const { viewport, panel, strip, axis, frames, activeIndex, moving, introducing, settled, requested, isRequested, registerFrame, select, step, beginDrag, dragTo, finishDrag } = useFilmstrip(photos, initialIndex, album.id, reading)
   const gesture = useRef<TouchGesture | null>(null)
   const suppressClickUntil = useRef(0)
   const photo = photos[activeIndex]
@@ -376,7 +526,7 @@ function AlbumGallery({ album, reading, children }: {
     }}>
       <div ref={panel} className={styles.panelShell} style={initialStyle.panel} data-content-panel>
         <div className={styles.panel}>
-          <section className={styles.gallery} aria-label={album.title} aria-roledescription="图片轮播" inert={reading}>
+          <section className={styles.gallery} aria-label={album.title} aria-roledescription="图片轮播" aria-busy={introducing} inert={reading}>
             <div ref={strip} className={styles.filmstrip} data-moving={moving} data-settled={settled !== null}
               onPointerDown={event => {
                 if (gesture.current && gesture.current.pointerId !== event.pointerId) return

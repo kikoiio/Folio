@@ -14,6 +14,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body>
+        <script dangerouslySetInnerHTML={{ __html: "(function(){try{var spec=performance.getEntriesByType('navigation')[0];var kind=spec&&spec.type;if(kind==='reload'||kind==='back_forward')return;if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;if(new URLSearchParams(location.hash.slice(1)).has('article'))return;document.documentElement.dataset.folioEntry='intro'}catch(error){}})()" }} />
         <SkipLink />
         {children}
       </body>

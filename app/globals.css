@@ -35,3 +35,19 @@ a { color: inherit; }
 @media (prefers-reduced-motion: no-preference) {
   html { scroll-behavior: smooth; }
 }
+
+/* Paint the gallery shell before hydration so a fresh open does not flash the enlarged photo. */
+html[data-folio-entry='intro'] #content {
+  background-color: #e5e1e4 !important;
+  color: #ededed !important;
+}
+
+html[data-folio-entry='intro'] [data-content-panel] {
+  --paint-reveal: 1 !important;
+  --panel-side: #b4a0ad !important;
+  background-color: #e2d8dd !important;
+}
+
+html[data-folio-entry='intro'] [data-moving] > a {
+  visibility: hidden;
+}
