@@ -1,7 +1,7 @@
 'use client'
 
 import Image from 'next/image'
-import { useLayoutEffect, useMemo, useRef, type MouseEvent } from 'react'
+import { useLayoutEffect, useMemo, useRef, type MouseEvent, type SyntheticEvent } from 'react'
 import { loadArticle, loadArticleIndex } from '../lib/article-data'
 import { albumHref, albumTitle, articleHref, formatDate } from '../lib/article-links'
 import type { ArticleIndex } from '../lib/article-types'
@@ -26,6 +26,7 @@ export default function ReadingOverlay({ indexSrc, albums, view, autoFocus }: {
 }) {
   const scroll = useRef<HTMLDivElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
+  const pageFrame = useRef<HTMLIFrameElement>(null)
   const allowFocus = useRef(autoFocus)
   useLayoutEffect(() => { allowFocus.current = autoFocus }, [autoFocus])
   const { slug, section } = view
@@ -63,7 +64,7 @@ export default function ReadingOverlay({ indexSrc, albums, view, autoFocus }: {
       if (root && progress?.scrollTop != null) root.scrollTop = progress.scrollTop
       else if (target) target.scrollIntoView({ block: 'start' })
       else if (root) root.scrollTop = 0
-      if (allowFocus.current) heading.current?.focus({ preventScroll: true })
+      if (allowFocus.current) (heading.current ?? pageFrame.current)?.focus({ preventScroll: true })
       restored = true
     })
     return () => {
@@ -100,6 +101,27 @@ export default function ReadingOverlay({ indexSrc, albums, view, autoFocus }: {
       }
     }
   }
+
+  function preparePage(event: SyntheticEvent<HTMLIFrameElement>) {
+    try {
+      const doc = event.currentTarget.contentDocument
+      if (!doc) return
+      const style = doc.createElement('style')
+      style.textContent = 'html, body { background: transparent !important; }'
+      ;(doc.head ?? doc.documentElement).appendChild(style)
+      doc.addEventListener('keydown', keyEvent => {
+        if (keyEvent.key === 'Escape') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      })
+    } catch {
+      // 页面可能已跳转到跨域文档，无法访问其 document。
+    }
+  }
+
+  if (article?.src) return (
+    <div id="folio-reader" role="region" aria-label="阅读博客" className={`${styles.reader} ${styles.pageReader}`} data-reader>
+      <iframe ref={pageFrame} src={article.src + (section ? `#${encodeURIComponent(section)}` : '')} title={article.title} className={styles.page} tabIndex={0} onLoad={preparePage} />
+    </div>
+  )
 
   return (
     <div id="folio-reader" role="region" aria-label="阅读博客" className={styles.reader} data-reader onClick={followArticleLink}>

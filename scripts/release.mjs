@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 
 const pictureTypes = new Set(['.png', '.jpg', '.jpeg', '.webp', '.avif'])
-const blogTypes = new Set([...pictureTypes, '.md', '.mdx', '.svg', '.gif', '.pdf', '.txt'])
+const blogTypes = new Set([...pictureTypes, '.md', '.mdx', '.html', '.svg', '.gif', '.pdf', '.txt'])
 const siteFiles = new Set(['site/config.json', 'site/icon.png'])
 const sort = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 const hashPattern = /^[a-f0-9]{64}$/

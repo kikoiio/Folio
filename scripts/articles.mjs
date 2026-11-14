@@ -4,7 +4,7 @@ import matter from 'gray-matter'
 import MarkdownIt from 'markdown-it'
 
 export function articleSlug(relative) {
-  const stem = relative.replace(/\.(md|mdx)$/i, '')
+  const stem = relative.replace(/\.(md|mdx|html)$/i, '')
   return stem.replace(/\/index$/i, '')
 }
 
@@ -49,7 +49,7 @@ function resolveUrl(value, relative, assets, image = false) {
   if (/[\u0000-\u001f\\]/.test(decoded) || path.posix.isAbsolute(decoded)) return ''
   const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(relative), decoded))
   if (resolved === '..' || resolved.startsWith('../') || resolved.split('/').some(part => part.startsWith('.'))) return ''
-  if (/\.(md|mdx)$/i.test(resolved) && !image) {
+  if (/\.(md|mdx|html)$/i.test(resolved) && !image) {
     const params = new URLSearchParams([['article', articleSlug(resolved)]])
     const fragmentIndex = match[2].indexOf('#')
     if (fragmentIndex >= 0) {
@@ -134,12 +134,50 @@ export function parseArticle({ source, relative, assets = new Map() }) {
   }
 }
 
+function decodeEntities(value) {
+  return value
+    .replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (_, hex, dec) => {
+      const code = parseInt(hex ?? dec, hex ? 16 : 10)
+      return code <= 0x10ffff ? String.fromCodePoint(code) : ''
+    })
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+}
+
+function metaContent(source, name) {
+  for (const match of source.matchAll(/<meta\s[^>]*>/gi)) {
+    const tag = match[0]
+    if (/\bname\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1].toLowerCase() !== name) continue
+    return decodeEntities(/\bcontent\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1] ?? '')
+  }
+  return null
+}
+
+export function parseHtmlArticle({ source, relative }) {
+  const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(source)
+  const title = decodeEntities(titleMatch?.[1] ?? '').trim() || path.posix.basename(relative).replace(/\.html$/i, '').replaceAll(/[_-]/g, ' ')
+  const directory = path.posix.dirname(relative)
+  return {
+    slug: articleSlug(relative), title,
+    directory: directory === '.' ? '' : directory,
+    description: (metaContent(source, 'description') ?? '').trim(),
+    date: articleDate(metaContent(source, 'date') || null),
+    category: directory === '.' ? null : directory.replaceAll('/', ' / '),
+    cover: null, album: null,
+    html: '', toc: [],
+    src: `/media/blogs/${relative.split('/').map(encodeURIComponent).join('/')}`,
+  }
+}
+
 export async function readArticles(root, files, assets = new Map()) {
   const articles = []
   const slugs = new Set()
   for (const relative of files) {
-    if (!/\.(md|mdx)$/i.test(relative)) continue
-    const article = parseArticle({ source: await fs.readFile(path.join(root, relative), 'utf8'), relative: relative.split(path.sep).join('/'), assets })
+    if (!/\.(md|mdx|html)$/i.test(relative)) continue
+    const normalized = relative.split(path.sep).join('/')
+    const source = await fs.readFile(path.join(root, relative), 'utf8')
+    const article = /\.html$/i.test(normalized)
+      ? parseHtmlArticle({ source, relative: normalized })
+      : parseArticle({ source, relative: normalized, assets })
     if (!article) continue
     if (slugs.has(article.slug)) throw new Error(`Duplicate article URL: ${article.slug}`)
     slugs.add(article.slug)

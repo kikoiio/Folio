@@ -53,6 +53,7 @@ export async function writeArticleAssets(articles, publicArticlesRoot) {
       ...details,
       html: article.html,
       toc: article.toc.map(({ id, title, level }) => ({ id, title, level })),
+      ...(article.src === undefined ? {} : { src: article.src }),
     })
     // Slugs never become file paths, including nested or non-ASCII slugs.
     await writeIfChanged(path.join(publicArticlesRoot, body.file), body.json)

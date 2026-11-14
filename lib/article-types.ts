@@ -9,9 +9,10 @@ export type Article = {
   album: string | null
   html: string
   toc: { id: string; title: string; level: number }[]
+  src?: string
 }
 
-export type ArticleMetadata = Omit<Article, 'html' | 'toc'>
+export type ArticleMetadata = Omit<Article, 'html' | 'toc' | 'src'>
 
 export type ArticleIndexEntry = ArticleMetadata & { bodySrc: string }
 

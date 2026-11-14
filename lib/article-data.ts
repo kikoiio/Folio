@@ -67,6 +67,15 @@ function assetSrc(value: unknown, kind: 'article' | 'index'): string {
   return result
 }
 
+function pageSrc(value: unknown): string {
+  const result = text(value)
+  const prefix = '/media/blogs/'
+  if (!result.startsWith(prefix) || /[\u0000-\u0020\u007f\\]/u.test(result) || result.slice(prefix.length).split('/').some(part => !part || part === '.' || part === '..')) {
+    throw new Error('Invalid article page URL')
+  }
+  return result
+}
+
 export function parseArticleIndex(value: unknown): ArticleIndex {
   if (!Array.isArray(value)) throw new Error('Expected article index')
   const slugs = new Set<string>()
@@ -93,7 +102,7 @@ export function parseArticleBody(value: unknown): Article {
     ids.add(id)
     return { id, title: text(entry.title), level }
   })
-  return { ...metadata(article), html: text(article.html), toc }
+  return { ...metadata(article), html: text(article.html), toc, ...(article.src === undefined ? {} : { src: pageSrc(article.src) }) }
 }
 
 const indexes = new Map<string, ArticleIndex>()
